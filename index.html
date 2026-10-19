@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Treppenzähler</title>
+<meta name="theme-color" content="#1f6f5c">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<style>
+  :root {
+    --bg: #f5f6f4; --card: #ffffff; --text: #1b1f1d; --muted: #5f6b66; --line: #dde2df;
+    --accent: #1f6f5c; --accent-text: #ffffff; --warn: #9a5b00; --warn-bg: #fff3df;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121514; --card: #1b201e; --text: #e8ece9; --muted: #9aa6a0; --line: #2c3431;
+      --accent: #4cc2a2; --accent-text: #0b1512; --warn: #ffc56b; --warn-bg: #33270f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 560px; margin: 0 auto; padding: 16px 16px 48px; }
+  h1 { font-size: 1.25rem; margin: 4px 0 12px; }
+  h2 { font-size: 1rem; margin: 0 0 10px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+  .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .stat .v { font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .stat .l { color: var(--muted); font-size: .85rem; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--text);
+    border-radius: 10px; padding: 10px 14px; min-height: 44px; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .5; }
+  .big { width: 100%; font-size: 1.1rem; }
+  .muted { color: var(--muted); font-size: .9rem; }
+  .warn { background: var(--warn-bg); color: var(--warn); border-radius: 10px; padding: 10px 12px; font-size: .9rem; }
+  label.f { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 6px 0; }
+  input[type=number], input[type=text], select { font: inherit; width: 8.5em; padding: 6px 8px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  ul.log { list-style: none; margin: 0; padding: 0; font-size: .9rem; max-height: 220px; overflow: auto; }
+  ul.log li { padding: 4px 0; border-bottom: 1px solid var(--line); }
+  details > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; font-variant-numeric: tabular-nums; }
+  td, th { text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+  td:first-child, th:first-child { text-align: left; }
+  .live { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Treppenzähler</h1>
+
+  <div id="warnHidden" class="warn" hidden></div>
+
+  <section class="card">
+    <div class="stats">
+      <div class="stat"><div class="v" id="sUp">0</div><div class="l">Stufen hoch</div></div>
+      <div class="stat"><div class="v" id="sFloors">0</div><div class="l">Stockwerke hoch</div></div>
+      <div class="stat"><div class="v" id="sHeight">0 m</div><div class="l">Höhenmeter hoch</div></div>
+      <div class="stat"><div class="v" id="sDown">0</div><div class="l">Stufen runter</div></div>
+    </div>
+    <p class="muted live" id="live">Gestoppt.</p>
+    <button id="btnRun" class="primary big">Zählung starten</button>
+    <label class="f"><span>Bildschirm anlassen (sonst pausiert die Zählung)</span><input type="checkbox" id="optWake" checked></label>
+  </section>
+
+  <section class="card">
+    <h2>Letzte Läufe</h2>
+    <ul class="log" id="log"><li class="muted">Noch nichts erkannt.</li></ul>
+  </section>
+
+  <section class="card">
+    <details id="calibBox">
+      <summary>Kalibrierung</summary>
+      <p class="muted">Handy so tragen wie im Alltag (z. B. Hosentasche). Modus wählen, „Aufnehmen“ tippen,
+        Handy einstecken, gehen, danach „Stopp“. Je Modus mindestens 20 Schritte. Pflicht: <b>eben</b> und
+        <b>hoch</b>, empfohlen: <b>runter</b>, optional die schnellen Varianten.</p>
+      <div class="row">
+        <select id="calLabel">
+          <option value="flat">eben gehen</option>
+          <option value="up">hoch (1 Stufe/Schritt)</option>
+          <option value="down">runter (1 Stufe/Schritt)</option>
+          <option value="up2">hoch (2 Stufen/Schritt)</option>
+          <option value="down2">runter (2 Stufen/Schritt)</option>
+        </select>
+        <button id="btnCal">Aufnehmen</button>
+      </div>
+      <p class="muted" id="calInfo"></p>
+      <div class="row">
+        <button id="btnBuild">Modell übernehmen</button>
+        <button id="btnModelReset">Standardmodell</button>
+      </div>
+      <p class="muted" id="modelInfo"></p>
+    </details>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>Einstellungen</summary>
+      <label class="f"><span>Stufenhöhe (cm)</span><input type="number" id="cfgRiser" min="10" max="25" step="0.5"></label>
+      <label class="f"><span>Stufen pro Stockwerk</span><input type="number" id="cfgPerFloor" min="5" max="60"></label>
+      <label class="f"><span>Bekannte Lauflängen (Stufen)</span><input type="text" id="cfgLengths" placeholder="5, 10"></label>
+      <label class="f"><span>Immer einrasten (auch ohne Drehung)</span><input type="checkbox" id="cfgSnapAlways"></label>
+      <p class="muted">Lauflängen leer lassen, wenn die Treppen unterschiedlich lang sind – dann wird roh gezählt.</p>
+    </details>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>Verlauf</summary>
+      <table><thead><tr><th>Tag</th><th>hoch</th><th>runter</th><th>Stockw.</th><th>Schritte</th></tr></thead>
+        <tbody id="hist"></tbody></table>
+      <div class="row" style="margin-top:10px"><button id="btnResetDay">Heute zurücksetzen</button></div>
+    </details>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>Entwicklung: Rohdaten</summary>
+      <p class="muted">Zeichnet Sensordaten als CSV auf, damit wir den Algorithmus an echten Treppen abstimmen können.
+        Mit „Markierung“ Ereignisse festhalten (z. B. Treppenbeginn).</p>
+      <div class="row">
+        <button id="btnRec">Aufnahme starten</button>
+        <input type="text" id="markText" placeholder="z. B. hoch 5">
+        <button id="btnMark">Markierung</button>
+      </div>
+      <p class="muted" id="recInfo"></p>
+      <div class="row">
+        <label class="row muted">CSV abspielen <input type="file" id="fileReplay" accept=".csv,text/csv"></label>
+      </div>
+      <p class="muted live" id="sensorInfo"></p>
+    </details>
+  </section>
+</main>
+<script src="detector.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
