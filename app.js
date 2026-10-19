@@ -1,7 +1,7 @@
 /* Treppenzähler – UI, Sensoranbindung, Speicherung. */
 'use strict';
 
-const { StairDetector, CLASSES, DEFAULT_MODEL, DEFAULT_CFG } = self.StairCore;
+const { StairDetector, CLASSES, DEFAULT_MODEL, DEFAULT_CFG, MODEL_VERSION } = self.StairCore;
 const $ = (id) => document.getElementById(id);
 
 // ---- Speicher (localStorage, defensiv) ----------------------------------------
@@ -12,7 +12,8 @@ const store = {
 const today = () => new Date().toLocaleDateString('sv'); // YYYY-MM-DD lokal
 
 let cfg = Object.assign({}, DEFAULT_CFG, store.get('tz.cfg', {}));
-let model = store.get('tz.model', null) || DEFAULT_MODEL;
+let model = store.get('tz.model', null);
+if (!model || model.version !== MODEL_VERSION) model = DEFAULT_MODEL; // altes Merkmalsformat verwerfen
 let days = store.get('tz.days', {});
 
 function day() {

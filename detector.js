@@ -26,9 +26,10 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  const FEATURES = ['dur', 'p2p', 'hRms', 'jerk', 'swing', 'skew'];
+  const FEATURES = ['dur', 'p2p', 'hRms', 'jerk', 'swing', 'skew', 'zExc'];
+  const MODEL_VERSION = 2;
   // Untergrenzen der Standardabweichung je Merkmal (verhindert Überanpassung)
-  const MIN_SD = [0.04, 0.8, 0.3, 8, 5, 0.2];
+  const MIN_SD = [0.04, 0.8, 0.3, 8, 3, 0.2, 0.5];
 
   const CLASSES = {
     flat:  { dir: 0,  per: 0, label: 'eben' },
@@ -38,14 +39,16 @@
     down2: { dir: -1, per: 2, label: 'runter, 2 Stufen/Schritt' },
   };
 
-  // Grobe Schätzwerte (Handy in der Hosentasche). Kalibrierung ersetzt sie.
+  // Grobe Schätzwerte (Handy seitlich am Gürtel). Kalibrierung ersetzt sie.
+  // swing = Beckenkippung (°), zExc = vertikaler Hub der Hüfte je Schritt (cm)
   const DEFAULT_MODEL = {
+    version: MODEL_VERSION,
     calibrated: false,
     classes: {
-      flat: { mu: [0.55, 7, 2.5, 60, 45, 0.6], sd: [0.08, 2.5, 1, 25, 15, 0.5] },
-      up:   { mu: [0.68, 6, 2.0, 45, 70, 0.3], sd: [0.10, 2.5, 1, 20, 18, 0.5] },
-      up2:  { mu: [0.85, 9, 2.5, 55, 90, 0.3], sd: [0.12, 3, 1, 25, 20, 0.5] },
-      down: { mu: [0.52, 10, 2.5, 90, 50, 1.0], sd: [0.08, 3, 1, 35, 15, 0.6] },
+      flat: { mu: [0.55, 6, 2.0, 50, 12, 0.5, 4], sd: [0.08, 2, 0.8, 20, 5, 0.5, 1.5] },
+      up:   { mu: [0.68, 5, 1.6, 40, 16, 0.2, 6], sd: [0.10, 2, 0.8, 20, 6, 0.5, 2] },
+      up2:  { mu: [0.85, 8, 2.0, 50, 20, 0.2, 9], sd: [0.12, 3, 0.8, 25, 7, 0.5, 3] },
+      down: { mu: [0.52, 9, 2.2, 80, 12, 1.0, 5], sd: [0.08, 3, 0.8, 30, 5, 0.6, 2] },
     },
   };
 
@@ -115,7 +118,7 @@
       this.lastT = t;
       const a = [ax, ay, az];
       const kS = 1 - Math.exp(-dt / 0.6);   // Schwerkraft (langsam)
-      const kF = 1 - Math.exp(-dt / 0.08);  // Neigung des Geräts (schnell, für Oberschenkelschwung)
+      const kF = 1 - Math.exp(-dt / 0.08);  // Neigung des Geräts (schnell, für Neigungsschwung)
       const kA = 1 - Math.exp(-dt / 0.05);  // Glättung av für Schrittspitzen
       for (let i = 0; i < 3; i++) {
         this.g[i] += kS * (a[i] - this.g[i]);
@@ -199,10 +202,10 @@
       if (!classes.flat || (!classes.up && !classes.down)) return null;
       // Doppelstufen-Klasse aus "hoch" ableiten, falls nicht selbst kalibriert
       if (classes.up && !classes.up2) {
-        const s = [1.25, 1.3, 1.1, 1.1, 1.25, 1];
+        const s = [1.25, 1.3, 1.1, 1.1, 1.25, 1, 1.5];
         classes.up2 = { mu: classes.up.mu.map((v, i) => v * s[i]), sd: classes.up.sd.slice(), derived: true };
       }
-      return { calibrated: true, created: Date.now(), classes };
+      return { version: MODEL_VERSION, calibrated: true, created: Date.now(), classes };
     }
 
     // ---- intern ---------------------------------------------------------------
@@ -275,7 +278,7 @@
       const sd = Math.sqrt(m2 / n) || 1e-6;
       const skew = m3 / n / sd ** 3;
 
-      // Oberschenkelschwung: Winkelbereich der Geräteneigung über die letzten 2 Schritte
+      // Neigungsschwung des Geräts über die letzten 2 Schritte (Halfter: Beckenkippung, Tasche: Oberschenkel)
       const ws = this.buf.filter((s) => s.t > (tPrev ?? t0) && s.t <= t1);
       let mx = 0, my = 0, mz = 0;
       for (const s of ws) { mx += s.fx; my += s.fy; mz += s.fz; }
@@ -288,7 +291,22 @@
       }
       const swing = (2 * maxAng * 180) / Math.PI;
 
-      return [(t1 - t0) / 1000, max - min, Math.sqrt(h2 / n), jerk / n, swing, skew];
+      // Vertikaler Hub: av zweimal integrieren. Am gleichen Gangphasenpunkt (Spitze) ist die
+      // Geschwindigkeit gleich -> Geschwindigkeit linear entdriften; Weg ebenso (Netto-Steigung
+      // ist ohnehin nicht beobachtbar), übrig bleibt die Auf-und-ab-Bewegung innerhalb des Schritts.
+      const v = [0], z = [0];
+      for (let i = 1; i < n; i++) v.push(v[i - 1] + ((w[i].av + w[i - 1].av) / 2) * ((w[i].t - w[i - 1].t) / 1000));
+      for (let i = 0; i < n; i++) v[i] -= (v[n - 1] * i) / (n - 1);
+      for (let i = 1; i < n; i++) z.push(z[i - 1] + ((v[i] + v[i - 1]) / 2) * ((w[i].t - w[i - 1].t) / 1000));
+      let zMin = Infinity, zMax = -Infinity;
+      for (let i = 0; i < n; i++) {
+        const zi = z[i] - (z[n - 1] * i) / (n - 1);
+        if (zi < zMin) zMin = zi;
+        if (zi > zMax) zMax = zi;
+      }
+      const zExc = (zMax - zMin) * 100;
+
+      return [(t1 - t0) / 1000, max - min, Math.sqrt(h2 / n), jerk / n, swing, skew, zExc];
     }
 
     classify(x) {
@@ -416,5 +434,5 @@
     }
   }
 
-  return { StairDetector, FEATURES, CLASSES, DEFAULT_MODEL, DEFAULT_CFG };
+  return { StairDetector, FEATURES, CLASSES, DEFAULT_MODEL, DEFAULT_CFG, MODEL_VERSION };
 });

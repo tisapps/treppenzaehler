@@ -15,7 +15,7 @@ Lokal: `python3 -m http.server` (Sensoren gibt es nur über HTTPS bzw. localhost
 ## Verfahren
 1. Schwerkraftrichtung per Tiefpass → vertikale Beschleunigung, Gierrate um die Hochachse.
 2. Schritte = Spitzen der vertikalen Beschleunigung.
-3. Pro Schritt Merkmale (Dauer, Spitze-Spitze, horizontaler Anteil, Ruck, Oberschenkelschwung, Schiefe)
+3. Pro Schritt Merkmale (Dauer, Spitze-Spitze, horizontaler Anteil, Ruck, Neigungsschwung, Schiefe, vertikaler Hub der Hüfte)
    → Klassifikation eben / hoch / runter / hoch mit 2 Stufen pro Schritt (Gauß-Naive-Bayes, per Kalibrierung gelernt).
 4. Aufeinanderfolgende Treppenschritte = Lauf; 180°-Wenden (Gyroskop) trennen Läufe am Podest.
 5. Läufe mit Wende davor/danach werden auf bekannte Lauflängen (5 / 10) eingerastet; dabei wird auch
