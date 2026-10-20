@@ -71,12 +71,21 @@ const cases = [
   { name: 'schnell hoch (2 Stufen/Schritt)', expectUp: 15, expectDown: 0,
     seq: [{ still: 1 }, { kind: 'flat', steps: 6 }, { kind: 'up2', steps: 3 }, { turn: 180, s: 1.0 },
       { kind: 'up2', steps: 5 }, { kind: 'flat', steps: 6 }, { still: 2 }] },
-  { name: 'eben, 20 % treppenähnliche Schritte, mit Wenden', expectUp: 0, expectDown: 0,
+  // Belastungstest: zufällig verstreute, voll treppenähnliche Schritte. Vier davon in Folge sind von einem
+  // echten 5er-Lauf ohne Wende nicht zu unterscheiden -> vereinzelte Fehlzählung wird toleriert.
+  { name: 'eben, 20 % treppenähnliche Schritte, mit Wenden', expectUp: 0, expectDown: 0, tolerance: 5,
     seq: [{ still: 1 }, { kind: 'flat', steps: 40, mix: { kind: 'up', p: 0.2 } }, { turn: 180, s: 1.0 },
       { kind: 'flat', steps: 40, mix: { kind: 'up', p: 0.2 } }, { turn: -180, s: 1.0 },
       { kind: 'flat', steps: 40, mix: { kind: 'down', p: 0.2 } }, { still: 1 }] },
-  { name: 'gerade Treppe ohne Wende (wird nicht gezählt)', expectUp: 0, expectDown: 0,
-    seq: [{ still: 1 }, { kind: 'flat', steps: 8 }, { kind: 'up', steps: 12 }, { kind: 'flat', steps: 8 }, { still: 1 }] },
+  { name: 'Halbetage: einzelner 10er ohne Wende', expectUp: 10, expectDown: 0,
+    seq: [{ still: 1 }, { kind: 'flat', steps: 8 }, { kind: 'up', steps: 10 }, { kind: 'flat', steps: 8 }, { still: 1 }] },
+  { name: 'Halbetage: einzelner 5er ohne Wende, runter', expectUp: 0, expectDown: 5,
+    seq: [{ still: 1 }, { kind: 'flat', steps: 8 }, { kind: 'down', steps: 5 }, { kind: 'flat', steps: 8 }, { still: 1 }] },
+  { name: 'Halbetagen hoch 10, Flur, 5', expectUp: 15, expectDown: 0,
+    seq: [{ still: 1 }, { kind: 'flat', steps: 6 }, { kind: 'up', steps: 10 }, { kind: 'flat', steps: 12 },
+      { kind: 'up', steps: 5 }, { kind: 'flat', steps: 6 }, { still: 1 }] },
+  { name: 'eben, 20 % treppenähnliche Schritte, ohne Wenden', expectUp: 0, expectDown: 0, tolerance: 5,
+    seq: [{ still: 1 }, { kind: 'flat', steps: 120, mix: { kind: 'up', p: 0.2 } }, { still: 1 }] },
   { name: 'nur eben mit Wenden', expectUp: 0, expectDown: 0,
     seq: [{ still: 1 }, { kind: 'flat', steps: 20 }, { turn: 180, s: 1.0 }, { kind: 'flat', steps: 20 }, { still: 1 }] },
 ];
@@ -87,7 +96,8 @@ for (const c of cases) {
   const log = [];
   d.on('flight', (f) => log.push(`${f.dir > 0 ? '↑' : '↓'}${f.stairs}${f.snapped ? `(roh ${f.raw})` : ''}`));
   run(d, synth(c.seq, 7));
-  const ok = d.totals.up === c.expectUp && d.totals.down === c.expectDown;
+  const err = Math.abs(d.totals.up - c.expectUp) + Math.abs(d.totals.down - c.expectDown);
+  const ok = err <= (c.tolerance || 0);
   if (!ok) fail++;
   console.log(`${ok ? 'OK  ' : 'FAIL'} ${c.name}: hoch ${d.totals.up}/${c.expectUp}, runter ${d.totals.down}/${c.expectDown}, Schritte ${d.totals.steps} [${log.join(' ')}]`);
 }

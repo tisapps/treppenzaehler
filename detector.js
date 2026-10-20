@@ -64,7 +64,11 @@
     minFlightStairs: 3,     // kürzere Läufe werden verworfen
     stairBias: 1.0,         // Schritt gilt erst als Stufe, wenn log-Likelihood-Vorsprung vor "eben" größer
     minFlightLLR: 1.5,      // mittlerer Vorsprung, den ein ganzer Lauf mindestens braucht
-    requireTurn: true,      // nur Läufe mit 180°-Wende davor oder danach zählen (Treppenhaus)
+    requireTurn: false,     // nur Läufe mit 180°-Wende davor oder danach zählen
+    // Läufe ohne Wende (z. B. einzelner Abschnitt zwischen zwei Halbetagen) brauchen klarere Belege:
+    noTurnLLRFactor: 2,     // mittlerer Vorsprung x Faktor
+    noTurnShare: 0.85,      // Anteil treppenartiger Einzelschritte
+    noTurnSnapTolerance: 0.25, // engeres Einrasten auf bekannte Lauflängen
     calibTurnGuardS: 2,
     minStairShare: 0.7,     // Anteil Einzelschritte (ohne Mittelung), die selbst eher nach Treppe aussehen
     minStepsAlone: 4,       // kürzere Läufe zählen nur innerhalb einer Serie (Treppenhaus) ...
@@ -431,6 +435,11 @@
       const f = this.closing;
       this.closing = null;
       if (!f) return;
+      // Ränder kappen: durch die Zwei-Schritt-Mittelung hängt oft ein ebener Schritt am Lauf
+      while (f.steps.length && f.steps[f.steps.length - 1].own != null && f.steps[f.steps.length - 1].own <= 0) f.steps.pop();
+      while (f.steps.length && f.steps[0].own != null && f.steps[0].own <= 0) f.steps.shift();
+      if (!f.steps.length) return;
+      f.tLast = f.steps[f.steps.length - 1].t;
       const raw = f.steps.reduce((s, x) => s + x.per, 0);
       const info = { dir: f.dir, steps: f.steps.length, raw, t0: f.steps[0].t, t1: f.tLast,
         turnBefore: !!f.turnBefore, turnAfter: !!f.turnAfter };
@@ -441,7 +450,13 @@
       const owns = f.steps.filter((x) => x.own != null);
       info.share = owns.length ? owns.filter((x) => x.own > 0).length / owns.length : 0;
       if (info.share < this.cfg.minStairShare) { info.reason = 'uneinheitliches Schrittmuster'; this.emit('discard', info); return; }
-      if (this.cfg.requireTurn && !f.turnBefore && !f.turnAfter) { info.reason = 'keine Wende'; this.emit('discard', info); return; }
+      const turn = f.turnBefore || f.turnAfter;
+      if (!turn) {
+        if (this.cfg.requireTurn) { info.reason = 'keine Wende'; this.emit('discard', info); return; }
+        if (info.meanLLR < this.cfg.minFlightLLR * this.cfg.noTurnLLRFactor || info.share < this.cfg.noTurnShare) {
+          info.reason = 'ohne Wende nicht eindeutig genug'; this.emit('discard', info); return;
+        }
+      }
       info.stairs = this._snap(f, raw);
       info.snapped = info.stairs !== raw;
       const series = this.lastFlight && this.lastFlight.dir === f.dir && info.t0 - this.lastFlight.t < this.cfg.seriesS * 1000;
@@ -476,7 +491,8 @@
     _snap(f, raw) {
       const lens = this.cfg.flightLengths;
       if (!lens || !lens.length) return raw;
-      if (!(f.turnBefore || f.turnAfter || this.cfg.snapAlways)) return raw;
+      const turn = f.turnBefore || f.turnAfter;
+      const tol = turn || this.cfg.snapAlways ? this.cfg.snapTolerance : this.cfg.noTurnSnapTolerance;
       const k = f.steps.length;
       const lf = this.lastFlight;
       const prevLen = lf && lf.dir === f.dir && f.steps[0].t - lf.t < 30000 ? lf.n : null;
@@ -487,7 +503,7 @@
       for (const len of lens) {
         for (const r of readings) {
           const dev = Math.abs(r.est - len) / len;
-          if (dev > this.cfg.snapTolerance) continue;
+          if (dev > tol) continue;
           const score = dev + r.pen - (prevLen !== null && len !== prevLen ? this.cfg.alternateBonus : 0);
           if (score < bestScore) { bestScore = score; best = len; }
         }

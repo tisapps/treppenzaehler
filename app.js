@@ -11,7 +11,9 @@ const store = {
 };
 const today = () => new Date().toLocaleDateString('sv'); // YYYY-MM-DD lokal
 
-let cfg = Object.assign({}, DEFAULT_CFG, store.get('tz.cfg', {}));
+const savedCfg = store.get('tz.cfg', {});
+if (!savedCfg.cfgVersion) delete savedCfg.requireTurn; // früherer Standard "nur mit Wende" entfällt
+let cfg = Object.assign({}, DEFAULT_CFG, savedCfg);
 let model = store.get('tz.model', null);
 if (!model || model.version !== MODEL_VERSION) model = DEFAULT_MODEL; // altes Merkmalsformat verwerfen
 let days = store.get('tz.days', {});
@@ -296,7 +298,7 @@ function saveSettings() {
   cfg.snapAlways = $('cfgSnapAlways').checked;
   cfg.requireTurn = $('cfgRequireTurn').checked;
   cfg.stairBias = Number.isFinite(+$('cfgBias').value) ? +$('cfgBias').value : DEFAULT_CFG.stairBias;
-  store.set('tz.cfg', { riserCm: cfg.riserCm, stairsPerFloor: cfg.stairsPerFloor,
+  store.set('tz.cfg', { cfgVersion: 2, riserCm: cfg.riserCm, stairsPerFloor: cfg.stairsPerFloor,
     flightLengths: cfg.flightLengths, snapAlways: cfg.snapAlways, requireTurn: cfg.requireTurn, stairBias: cfg.stairBias });
   Object.assign(det.cfg, cfg);
   render();

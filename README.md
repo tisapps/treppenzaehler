@@ -25,7 +25,10 @@ Lokal: `python3 -m http.server` (Sensoren gibt es nur über HTTPS bzw. localhost
 - Schritt zählt erst als Stufe, wenn er deutlich (Strenge) besser zu „Treppe“ passt als zu „eben“.
 - Merkmale über zwei Schritte gemittelt (Handy nur an einer Seite → links/rechts verschieden).
 - Ein Lauf braucht im Mittel genug Treppenmerkmale und mindestens 70 % treppenartige Einzelschritte.
-- Standardmäßig nur Läufe mit 180°-Wende davor/danach; sehr kurze Läufe (< 4 Schritte) nur innerhalb einer Serie.
+- Läufe mit 180°-Wende davor/danach: normale Schwellen. Läufe ohne Wende (einzelner 5er/10er zwischen Halbetagen):
+  doppelter Merkmalsvorsprung, ≥ 85 % treppenartige Einzelschritte, engeres Einrasten (±25 %).
+  Option „Nur Läufe mit Wende zählen“ ist strenger, verliert aber diese Abschnitte.
+- Sehr kurze Läufe (< 4 Schritte) nur innerhalb einer Serie.
 - Kalibrierung ignoriert die Podestschritte rund um Wenden; danach wird die Trennschärfe angezeigt.
 
 ## Bekannte Grenze
