@@ -62,6 +62,13 @@
     doublePenalty: 0.2,     // Malus für Umdeutung als 2 Stufen/Schritt
     singlePenalty: 0.15,    // Malus für Umdeutung als 1 Stufe/Schritt
     minFlightStairs: 3,     // kürzere Läufe werden verworfen
+    stairBias: 1.0,         // Schritt gilt erst als Stufe, wenn log-Likelihood-Vorsprung vor "eben" größer
+    minFlightLLR: 1.5,      // mittlerer Vorsprung, den ein ganzer Lauf mindestens braucht
+    requireTurn: true,      // nur Läufe mit 180°-Wende davor oder danach zählen (Treppenhaus)
+    calibTurnGuardS: 2,
+    minStairShare: 0.7,     // Anteil Einzelschritte (ohne Mittelung), die selbst eher nach Treppe aussehen
+    minStepsAlone: 4,       // kürzere Läufe zählen nur innerhalb einer Serie (Treppenhaus) ...
+    seriesS: 20,            // ... d. h. mit einem weiteren Lauf gleicher Richtung in diesem Abstand     // Kalibrierung: Schritte so nah an Wenden (Podest) ignorieren
     flatStepsEnd: 3,        // so viele ebene Schritte beenden einen Lauf
     pauseEndS: 3,           // Pause beendet einen Lauf
     turnDeg: 130,           // Drehung ab dieser Gierwinkeländerung ...
@@ -86,6 +93,7 @@
       this.handlers = {};
       this.collectLabel = null;
       this.calib = {};
+      this.calibTurns = [];
       this.reset();
     }
 
@@ -100,8 +108,8 @@
       this.lastTurnT = -Infinity;
       this.buf = [];
       this.lastPeakT = null; this.prevPeakT = null; this.peakEma = 2;
-      this.held = null; this.prevRawDir = null;
-      this.flight = null; this.closing = null; this.flatRun = 0; this.lastFlight = null;
+      this.held = null; this.prevRawDir = null; this.lastFeats = null;
+      this.flight = null; this.closing = null; this.flatRun = 0; this.lastFlight = null; this.shortPending = null;
       this.totals = { steps: 0, up: 0, down: 0, flights: 0 };
     }
 
@@ -155,6 +163,7 @@
         this._closeFlight(false);
       }
       if (this.closing && t > this.closing.deadline) this._commit();
+      if (this.shortPending) this._expireShort(t);
     }
 
     /** Am Ende einer Messung aufrufen: offene Läufe werden verbucht. */
@@ -163,6 +172,9 @@
     /** Noch nicht verbuchte Stufen (laufender Lauf), für die Live-Anzeige. */
     provisional() {
       const out = { up: 0, down: 0 };
+      if (this.shortPending) {
+        if (this.shortPending.dir > 0) out.up += this.shortPending.stairs; else out.down += this.shortPending.stairs;
+      }
       for (const f of [this.closing, this.flight]) {
         if (!f) continue;
         const n = f.steps.reduce((s, x) => s + x.per, 0);
@@ -188,7 +200,14 @@
     /** Baut aus gesammelten Schritten ein Modell (robust: Median / MAD). */
     buildModel() {
       const classes = {};
-      for (const [label, rows] of Object.entries(this.calib)) {
+      const guard = this.cfg.calibTurnGuardS * 1000;
+      const turns = this.calibTurns || [];
+      const used = {};
+      for (const [label, all] of Object.entries(this.calib)) {
+        // Bei Treppen die Podestschritte rund um Wenden weglassen, sonst lernt "hoch" ebene Schritte mit
+        const rows = label === 'flat' ? all.map((r) => r.x)
+          : all.filter((r) => !turns.some((tt) => Math.abs(r.t - tt) < guard)).map((r) => r.x);
+        used[label] = rows;
         if (rows.length < 8) continue;
         const mu = [], sd = [];
         for (let i = 0; i < FEATURES.length; i++) {
@@ -205,7 +224,15 @@
         const s = [1.25, 1.3, 1.1, 1.1, 1.25, 1, 1.5];
         classes.up2 = { mu: classes.up.mu.map((v, i) => v * s[i]), sd: classes.up.sd.slice(), derived: true };
       }
-      return { version: MODEL_VERSION, calibrated: true, created: Date.now(), classes };
+      const model = { version: MODEL_VERSION, calibrated: true, created: Date.now(), classes };
+      // Trennschärfe auf den Kalibrierdaten: Anteil der Schritte, die als Stufe gelten
+      model.quality = {};
+      for (const [label, rows] of Object.entries(used)) {
+        if (!rows.length) continue;
+        const stairs = rows.filter((x) => this.classify(x, model).cls !== 'flat').length;
+        model.quality[label] = { n: rows.length, stairShare: stairs / rows.length };
+      }
+      return model;
     }
 
     // ---- intern ---------------------------------------------------------------
@@ -231,6 +258,7 @@
 
     _turn(tm, deg) {
       this.lastTurnT = tm;
+      if (this.collectLabel) this.calibTurns.push(tm);
       this.emit('turn', { t: tm, deg });
       this._flushHeld();
       const f = this.flight;
@@ -309,29 +337,41 @@
       return [(t1 - t0) / 1000, max - min, Math.sqrt(h2 / n), jerk / n, swing, skew, zExc];
     }
 
-    classify(x) {
-      let best = 'flat', bestLL = -Infinity;
-      for (const [name, c] of Object.entries(this.model.classes)) {
+    /** Liefert Klasse und llr = Vorsprung der besten Treppenklasse vor "eben" (log-Likelihood). */
+    classify(x, model = this.model) {
+      let flatLL = -Infinity, best = null, bestLL = -Infinity;
+      for (const [name, c] of Object.entries(model.classes)) {
         if (!CLASSES[name]) continue;
         let ll = 0;
         for (let i = 0; i < x.length; i++) {
           const sd = Math.max(c.sd[i], MIN_SD[i]);
-          const z = (x[i] - c.mu[i]) / sd;
+          const z = Math.max(-4, Math.min(4, (x[i] - c.mu[i]) / sd)); // ein Ausreißer-Merkmal entscheidet nicht allein
           ll -= 0.5 * z * z + Math.log(sd);
         }
-        if (ll > bestLL) { bestLL = ll; best = name; }
+        if (name === 'flat') flatLL = ll;
+        else if (ll > bestLL) { bestLL = ll; best = name; }
       }
-      return best;
+      const llr = best ? bestLL - flatLL : -Infinity;
+      return { cls: best && llr > this.cfg.stairBias ? best : 'flat', llr };
     }
 
     _step(step) {
       this.totals.steps++;
       if (step.feats) {
-        step.cls = this.classify(step.feats);
+        // Doppelschritt-Mittel: gleicht den Links/rechts-Unterschied aus (Handy nur an einer Seite)
+        const x = this.lastFeats ? step.feats.map((v, i) => (v + this.lastFeats[i]) / 2) : step.feats;
+        this.lastFeats = step.feats;
+        const c = this.classify(x);
+        step.cls = c.cls;
+        step.llr = c.llr;
+        // Einzelschritt-Beleg ohne Mittelung: trennt echte Läufe von verstreuten treppenähnlichen Schritten
+        step.own = x === step.feats ? c.llr : this.classify(step.feats).llr;
         step.rawDir = CLASSES[step.cls].dir;
-        if (this.collectLabel) this.calib[this.collectLabel].push(step.feats);
+        if (this.collectLabel) this.calib[this.collectLabel].push({ t: step.t, x });
       } else {
+        this.lastFeats = null;
         step.cls = null;
+        step.llr = null;
         step.rawDir = null; // erster Schritt nach Stillstand: unbekannt
       }
       this.emit('step', step);
@@ -372,7 +412,7 @@
       if (!this.flight) {
         this.flight = { dir, steps: [], turnBefore: step.t - this.lastTurnT < this.cfg.turnLinkS * 1000 };
       }
-      this.flight.steps.push({ t: step.t, per: per || 1 });
+      this.flight.steps.push({ t: step.t, per: per || 1, llr: step.llr, own: step.own });
       this.flight.tLast = step.t;
       this.emit('progress', this.provisional());
     }
@@ -394,13 +434,43 @@
       const raw = f.steps.reduce((s, x) => s + x.per, 0);
       const info = { dir: f.dir, steps: f.steps.length, raw, t0: f.steps[0].t, t1: f.tLast,
         turnBefore: !!f.turnBefore, turnAfter: !!f.turnAfter };
-      if (raw < this.cfg.minFlightStairs) { this.emit('discard', info); return; }
+      const llrs = f.steps.map((x) => x.llr).filter((v) => v != null && isFinite(v));
+      info.meanLLR = llrs.length ? llrs.reduce((a, b) => a + b, 0) / llrs.length : 0;
+      if (raw < this.cfg.minFlightStairs) { info.reason = 'zu kurz'; this.emit('discard', info); return; }
+      if (info.meanLLR < this.cfg.minFlightLLR) { info.reason = 'zu wenig Treppenmerkmale'; this.emit('discard', info); return; }
+      const owns = f.steps.filter((x) => x.own != null);
+      info.share = owns.length ? owns.filter((x) => x.own > 0).length / owns.length : 0;
+      if (info.share < this.cfg.minStairShare) { info.reason = 'uneinheitliches Schrittmuster'; this.emit('discard', info); return; }
+      if (this.cfg.requireTurn && !f.turnBefore && !f.turnAfter) { info.reason = 'keine Wende'; this.emit('discard', info); return; }
       info.stairs = this._snap(f, raw);
       info.snapped = info.stairs !== raw;
-      if (f.dir > 0) this.totals.up += info.stairs; else this.totals.down += info.stairs;
+      const series = this.lastFlight && this.lastFlight.dir === f.dir && info.t0 - this.lastFlight.t < this.cfg.seriesS * 1000;
+      if (f.steps.length < this.cfg.minStepsAlone && !series) {
+        // kurzer Lauf allein ist schwacher Beleg: warten, ob ein weiterer Lauf folgt
+        this._expireShort();
+        this.shortPending = info;
+        return;
+      }
+      if (this.shortPending && this.shortPending.dir === f.dir && info.t0 - this.shortPending.t1 < this.cfg.seriesS * 1000) {
+        this._accept(this.shortPending);
+      }
+      this.shortPending = null;
+      this._accept(info);
+    }
+
+    _accept(info) {
+      if (info.dir > 0) this.totals.up += info.stairs; else this.totals.down += info.stairs;
       this.totals.flights++;
-      this.lastFlight = { dir: f.dir, n: info.stairs, t: f.tLast };
+      this.lastFlight = { dir: info.dir, n: info.stairs, t: info.t1 };
       this.emit('flight', info);
+    }
+
+    _expireShort(t = Infinity) {
+      const s = this.shortPending;
+      if (!s || t - s.t1 < this.cfg.seriesS * 1000) return;
+      this.shortPending = null;
+      s.reason = 'einzelner kurzer Lauf';
+      this.emit('discard', s);
     }
 
     _snap(f, raw) {
@@ -429,7 +499,8 @@
       this._flushHeld();
       this._closeFlight(false);
       this._commit();
-      this.lastPeakT = null; this.prevPeakT = null; this.prevRawDir = null;
+      this._expireShort();
+      this.lastPeakT = null; this.prevPeakT = null; this.prevRawDir = null; this.lastFeats = null;
       this.headHist = [];
     }
   }

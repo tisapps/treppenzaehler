@@ -1,5 +1,5 @@
 // Offline-Cache (cache-first). Version erhöhen, wenn sich Dateien ändern.
-const CACHE = 'treppen-v2';
+const CACHE = 'treppen-v3';
 const FILES = ['./', 'index.html', 'app.js', 'detector.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {

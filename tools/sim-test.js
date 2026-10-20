@@ -29,8 +29,9 @@ function synth(segments, seed = 1) {
       continue;
     }
     if (seg.still) { emit(seg.still, () => out.push([t, (rnd() - .5) * .05, G, 0, 0, 0, 0])); continue; }
-    const k = KINDS[seg.kind];
     for (let s = 0; s < seg.steps; s++) {
+      // mix: Anteil Schritte, die wie Treppe aussehen (überlappende Gangmuster)
+      const k = KINDS[seg.mix && rnd() < seg.mix.p ? seg.mix.kind : seg.kind];
       const dur = k.dur * (0.95 + 0.1 * rnd());
       emit(dur, (x) => {
         const av = k.amp * Math.cos(2 * Math.PI * x) + (rnd() - .5) * 0.3;
@@ -70,6 +71,12 @@ const cases = [
   { name: 'schnell hoch (2 Stufen/Schritt)', expectUp: 15, expectDown: 0,
     seq: [{ still: 1 }, { kind: 'flat', steps: 6 }, { kind: 'up2', steps: 3 }, { turn: 180, s: 1.0 },
       { kind: 'up2', steps: 5 }, { kind: 'flat', steps: 6 }, { still: 2 }] },
+  { name: 'eben, 20 % treppenähnliche Schritte, mit Wenden', expectUp: 0, expectDown: 0,
+    seq: [{ still: 1 }, { kind: 'flat', steps: 40, mix: { kind: 'up', p: 0.2 } }, { turn: 180, s: 1.0 },
+      { kind: 'flat', steps: 40, mix: { kind: 'up', p: 0.2 } }, { turn: -180, s: 1.0 },
+      { kind: 'flat', steps: 40, mix: { kind: 'down', p: 0.2 } }, { still: 1 }] },
+  { name: 'gerade Treppe ohne Wende (wird nicht gezählt)', expectUp: 0, expectDown: 0,
+    seq: [{ still: 1 }, { kind: 'flat', steps: 8 }, { kind: 'up', steps: 12 }, { kind: 'flat', steps: 8 }, { still: 1 }] },
   { name: 'nur eben mit Wenden', expectUp: 0, expectDown: 0,
     seq: [{ still: 1 }, { kind: 'flat', steps: 20 }, { turn: 180, s: 1.0 }, { kind: 'flat', steps: 20 }, { still: 1 }] },
 ];

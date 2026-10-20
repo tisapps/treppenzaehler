@@ -21,6 +21,13 @@ Lokal: `python3 -m http.server` (Sensoren gibt es nur über HTTPS bzw. localhost
 5. Läufe mit Wende davor/danach werden auf bekannte Lauflängen (5 / 10) eingerastet; dabei wird auch
    „2 Stufen pro Schritt“ als Lesart geprüft und der Wechsel kurz/lang bevorzugt.
 
+### Schutz gegen Fehlzählungen beim Gehen in der Ebene
+- Schritt zählt erst als Stufe, wenn er deutlich (Strenge) besser zu „Treppe“ passt als zu „eben“.
+- Merkmale über zwei Schritte gemittelt (Handy nur an einer Seite → links/rechts verschieden).
+- Ein Lauf braucht im Mittel genug Treppenmerkmale und mindestens 70 % treppenartige Einzelschritte.
+- Standardmäßig nur Läufe mit 180°-Wende davor/danach; sehr kurze Läufe (< 4 Schritte) nur innerhalb einer Serie.
+- Kalibrierung ignoriert die Podestschritte rund um Wenden; danach wird die Trennschärfe angezeigt.
+
 ## Bekannte Grenze
 Chrome pausiert Bewegungssensoren, sobald der Bildschirm aus ist oder die Seite im Hintergrund liegt.
 Eine reine PWA zählt deshalb nur bei eingeschaltetem Bildschirm (Option „Bildschirm anlassen“).

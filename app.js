@@ -31,7 +31,15 @@ function saveDays() {
 let det;
 function makeDetector() {
   const d = new StairDetector(cfg, model);
-  d.on('step', () => { day().steps++; saveDays(); render(); });
+  d.on('step', (s) => {
+    day().steps++;
+    saveDays();
+    if (s.cls) lastStepInfo = `letzter Schritt: ${CLASSES[s.cls].label} (Vorsprung ${s.llr >= 0 ? '+' : ''}${s.llr.toFixed(1)})`;
+    render();
+  });
+  d.on('discard', (f) => {
+    if (f.raw >= 3) addLog(`${clock()} verworfen: ${f.dir > 0 ? '↑' : '↓'}${f.raw} – ${f.reason}`);
+  });
   d.on('progress', render);
   d.on('flight', (f) => {
     const t = day();
@@ -47,7 +55,7 @@ function makeDetector() {
   return d;
 }
 det = makeDetector();
-let lastTurnInfo = '';
+let lastTurnInfo = '', lastStepInfo = '';
 
 // ---- Sensoren -------------------------------------------------------------------
 let running = false;
@@ -167,7 +175,7 @@ function draw() {
   }
   $('sensorInfo').textContent = running
     ? `Abtastrate ≈ ${fmt(rate)} Hz · Gyroskop: ${hasGyro === null ? '?' : hasGyro ? 'ja' : 'nein (keine Wenden-Erkennung)'}` +
-      (lastTurnInfo ? ` · ${lastTurnInfo}` : '')
+      (lastStepInfo ? ` · ${lastStepInfo}` : '') + (lastTurnInfo ? ` · ${lastTurnInfo}` : '')
     : '';
 
   const counts = det.collectedCounts();
@@ -178,7 +186,7 @@ function draw() {
       : '';
   $('btnCal').textContent = calibrating ? 'Stopp' : 'Aufnehmen';
   $('modelInfo').textContent = model.calibrated
-    ? `Kalibriertes Modell vom ${new Date(model.created).toLocaleString('de-DE')} (Klassen: ${Object.keys(model.classes).map((k) => CLASSES[k].label).join(', ')})`
+    ? `Kalibriertes Modell vom ${new Date(model.created).toLocaleString('de-DE')}. ` + qualityText(model)
     : 'Standardmodell (grobe Schätzung – bitte kalibrieren).';
   $('recInfo').textContent = recording ? `Aufnahme läuft: ${recording.length - 1} Messwerte` : '';
   $('btnRec').textContent = recording ? 'Aufnahme beenden & speichern' : 'Aufnahme starten';
@@ -265,23 +273,35 @@ $('fileReplay').onchange = async (ev) => {
 };
 
 // ---- Einstellungen ----------------------------------------------------------------
+function qualityText(m) {
+  if (!m.quality) return '';
+  const parts = Object.entries(m.quality).map(([k, q]) => k === 'flat'
+    ? `eben: ${Math.round(q.stairShare * 100)} % fälschlich als Stufe`
+    : `${CLASSES[k].label}: ${Math.round(q.stairShare * 100)} % erkannt`);
+  return 'Trennschärfe auf den Kalibrierschritten – ' + parts.join(', ') + '.';
+}
+
 function loadSettingsUI() {
   $('cfgRiser').value = cfg.riserCm;
   $('cfgPerFloor').value = cfg.stairsPerFloor;
   $('cfgLengths').value = cfg.flightLengths.join(', ');
   $('cfgSnapAlways').checked = cfg.snapAlways;
+  $('cfgRequireTurn').checked = cfg.requireTurn;
+  $('cfgBias').value = cfg.stairBias;
 }
 function saveSettings() {
   cfg.riserCm = +$('cfgRiser').value || DEFAULT_CFG.riserCm;
   cfg.stairsPerFloor = +$('cfgPerFloor').value || DEFAULT_CFG.stairsPerFloor;
   cfg.flightLengths = $('cfgLengths').value.split(/[,; ]+/).map(Number).filter((n) => n > 0);
   cfg.snapAlways = $('cfgSnapAlways').checked;
+  cfg.requireTurn = $('cfgRequireTurn').checked;
+  cfg.stairBias = Number.isFinite(+$('cfgBias').value) ? +$('cfgBias').value : DEFAULT_CFG.stairBias;
   store.set('tz.cfg', { riserCm: cfg.riserCm, stairsPerFloor: cfg.stairsPerFloor,
-    flightLengths: cfg.flightLengths, snapAlways: cfg.snapAlways });
+    flightLengths: cfg.flightLengths, snapAlways: cfg.snapAlways, requireTurn: cfg.requireTurn, stairBias: cfg.stairBias });
   Object.assign(det.cfg, cfg);
   render();
 }
-for (const id of ['cfgRiser', 'cfgPerFloor', 'cfgLengths', 'cfgSnapAlways']) $(id).onchange = saveSettings;
+for (const id of ['cfgRiser', 'cfgPerFloor', 'cfgLengths', 'cfgSnapAlways', 'cfgRequireTurn', 'cfgBias']) $(id).onchange = saveSettings;
 $('optWake').onchange = () => { if (running) ($('optWake').checked ? requestWake() : releaseWake()); };
 
 loadSettingsUI();
